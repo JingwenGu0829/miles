@@ -217,10 +217,17 @@ class RolloutManager:
         srv.recover()
 
     def _get_updatable_server(self) -> RolloutServer | None:
-        for srv in self.servers.values():
-            if srv.update_weights:
+        updatable = [srv for srv in self.servers.values() if srv.update_weights]
+        match updatable:
+            case []:
+                return None
+            case [srv]:
                 return srv
-        return None
+            case _:
+                raise ValueError(
+                    f"Multiple servers have update_weights=True: {[srv.model_name for srv in updatable]}. "
+                    f"Only one updatable server is supported."
+                )
 
     # -------------------------- misc APIs -----------------------------
 
