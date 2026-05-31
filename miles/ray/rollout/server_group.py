@@ -55,7 +55,9 @@ class ServerGroup:
         """Node-0 engines only (for multi-node serving)."""
         return self.all_engines[:: self.nodes_per_engine]
 
-    def start_engines(self, port_cursors: PortCursors) -> tuple[list, list[int]]:
+    def start_engines(
+        self, port_cursors: PortCursors, start_indices: list[int] | None = None
+    ) -> tuple[list, list[int]]:
         """Create Ray actors, allocate ports, and fire ``engine.init()`` without waiting.
 
         Mutates ``port_cursors`` in place to advance past any newly assigned ports.
@@ -76,6 +78,8 @@ class ServerGroup:
         new_engines = []
         new_engine_indices = []
         for i in range(len(self.all_engines)):
+            if (start_indices is not None) and (i not in start_indices):
+                continue
             if self.all_engines[i].is_allocated:
                 continue
 
@@ -188,18 +192,22 @@ class ServerGroup:
                 logger.info(f"Engine at index {i} is already None")
             self.all_engines[i].mark_stopped()
 
-    async def recover(self, port_cursors: PortCursors):
-        dead_indices = [i for i, engine in enumerate(self.all_engines) if not engine.is_allocated]
+    async def recover(self, port_cursors: PortCursors, filter_indices: list[int] | None = None):
+        if filter_indices is None:
+            filter_indices = [i for i, engine in enumerate(self.all_engines) if not engine.is_allocated]
+        start_indices = [idx for idx in filter_indices if not self.all_engines[idx].is_allocated]
 
-        handles, new_engine_indices = self.start_engines(port_cursors)
+        handles, new_engine_indices = self.start_engines(port_cursors, start_indices=start_indices)
         await asyncio.gather(*handles)
 
         release_handles = []
         all_resume_engines = []
         logger.info(f"Recovered {len(new_engine_indices)} dead rollout engines (worker_type={self.worker_type})")
-        assert len(new_engine_indices) == len(dead_indices), "curr_num_new_engines does not match dead_indices length"
-        if self.needs_offload and dead_indices:
-            new_engines = [self.all_engines[i] for i in dead_indices]
+        assert len(new_engine_indices) == len(
+            start_indices
+        ), "curr_num_new_engines does not match start_indices length"
+        if self.needs_offload and start_indices:
+            new_engines = [self.all_engines[i] for i in start_indices]
             release_handles.extend(engine.actor_handle.release_memory_occupation.remote() for engine in new_engines)
             if self.update_weights or self.model_path:
                 all_resume_engines.extend(new_engines)
