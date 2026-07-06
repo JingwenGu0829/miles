@@ -1,12 +1,9 @@
 """Logic layer of the session server: ``SessionCore``.
 
-- Each operation takes a request's primitives (HTTP method, query string, headers, already-read body bytes), mutates session state and/or proxies upstream via the injected ``backend``, and returns a Starlette ``Response``.
-- Knows nothing about HTTP servers or routing; the FastAPI adapter (``sessions.py`` + ``server.py``) reads each request and calls these methods.
-- One ``SessionCore`` owns exactly one ``SessionRegistry`` (the per-session TITO/trajectory state) and one proxy ``backend``.
-- Operations: ``health``, ``create_session``, ``get_session``, ``delete_session``, ``chat_completions``, and a generic ``proxy``.
-- Correctness-critical path: ``chat_completions`` — the per-session lock is held for request prep and state update but never during the proxy call; the ``closing`` re-checks and the ``num_assistant`` mismatch check gate concurrent DELETE/chat.
+HTTP-agnostic: the FastAPI adapter (``sessions.py`` + ``server.py``) turns each request into primitives and calls these methods. Owns one ``SessionRegistry`` (per-session TITO/trajectory state) and one proxy ``backend``.
 
-Structural extraction of the previous single-process route handlers; the observable behavior (status codes, parsed response content, error shapes, recorded trajectory) is unchanged.
+- ``chat_completions`` strips the R3 replay payloads (``routed_experts`` / ``indexer_topk``) from the client reply copy-on-write; the ``SessionRecord`` keeps the full response for the training path (``GET /sessions/{id}``).
+- ``chat_completions`` holds the per-session lock for prep and state update but not across the proxy call; ``closing`` re-checks and the ``num_assistant`` check gate concurrent DELETE/chat.
 """
 
 import json
@@ -45,6 +42,30 @@ class ProxyRequest:
 def _render_json(payload) -> bytes:
     """Encode like Starlette's JSONResponse (compact, non-ASCII preserved)."""
     return json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+
+
+_CLIENT_STRIPPED_META_KEYS = ("routed_experts", "indexer_topk")
+
+
+def _strip_replay_payloads(response: dict) -> dict:
+    stripped_choices = []
+    for choice in response.get("choices", []):
+        meta = choice.get("meta_info")
+        if isinstance(meta, dict) and any(k in meta for k in _CLIENT_STRIPPED_META_KEYS):
+            meta = {k: v for k, v in meta.items() if k not in _CLIENT_STRIPPED_META_KEYS}
+            choice = {**choice, "meta_info": meta}
+        stripped_choices.append(choice)
+    return {**response, "choices": stripped_choices}
+
+
+def _chat_client_response(result: dict, response: dict) -> Response:
+    headers = {k: v for k, v in result["headers"].items() if k.lower() not in _DROP_RESPONSE_HEADERS}
+    return Response(
+        content=_render_json(_strip_replay_payloads(response)),
+        status_code=result["status_code"],
+        headers=headers,
+        media_type=JSON_MEDIA_TYPE,
+    )
 
 
 def proxy_result_to_response(result: dict) -> Response:
@@ -210,7 +231,7 @@ class SessionCore:
         async with session.lock:
             if session.closing:
                 logger.warning(f"Session {session_id} closed during proxy, skipping state update")
-                return proxy_result_to_response(result)
+                return _chat_client_response(result, response)
 
             if session.num_assistant != expected_num_assistant:
                 logger.warning(
@@ -218,7 +239,7 @@ class SessionCore:
                     f"(expected num_assistant={expected_num_assistant}, "
                     f"got {session.num_assistant}), skipping state update"
                 )
-                return proxy_result_to_response(result)
+                return _chat_client_response(result, response)
 
             session.update_pretokenized_state(
                 request_messages,
@@ -239,7 +260,7 @@ class SessionCore:
             session.append_record(record)
         # --- lock released ---
 
-        return proxy_result_to_response(result)
+        return _chat_client_response(result, response)
 
     async def proxy(
         self, session_id: str, path: str, *, method: str, query: str, headers: dict, body: bytes
