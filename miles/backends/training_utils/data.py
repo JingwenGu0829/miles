@@ -21,32 +21,6 @@ from .parallel import get_parallel_state
 logger = logging.getLogger(__name__)
 
 
-_VARIABLE_LENGTH_AUDIO_INPUT_KEYS = {"input_features", "feature_attention_mask", "input_features_mask"}
-
-
-def _concatenate_audio_tensors(tensors: list[torch.Tensor]) -> torch.Tensor:
-    """Concatenate audio items, padding the duration dimension so they can share a batch."""
-    variable_dims = [
-        dim
-        for dim in range(1, tensors[0].ndim)
-        if any(tensor.shape[dim] != tensors[0].shape[dim] for tensor in tensors[1:])
-    ]
-    if not variable_dims:
-        return torch.cat(tensors, dim=0)
-    if len(variable_dims) != 1:
-        raise ValueError("Audio tensors may differ in only one non-item dimension")
-
-    variable_dim = variable_dims[0]
-    target_length = max(tensor.shape[variable_dim] for tensor in tensors)
-    padded = []
-    for tensor in tensors:
-        padding = []
-        for dim in range(tensor.ndim - 1, 0, -1):
-            padding.extend((0, target_length - tensor.shape[dim] if dim == variable_dim else 0))
-        padded.append(F.pad(tensor, padding, value=0))
-    return torch.cat(padded, dim=0)
-
-
 def _rollout_logprob_dtype(args: Namespace) -> torch.dtype:
     if getattr(args, "true_on_policy_mode", False):
         if getattr(args, "bf16", False):
@@ -323,21 +297,18 @@ def get_batch(
     # Process multimodal training tensors if present
     multimodal_train_inputs = batch.get("multimodal_train_inputs", None)
     if multimodal_train_inputs is not None:
-        multimodal_tensors = {}  # key -> tensors from each sequence
+        multimodal_data = {}  # key -> concatenated tensor
         multimodal_num_items = {}  # key -> list of item counts per sequence
         for mm_input_dict in multimodal_train_inputs:
             if mm_input_dict is not None:
                 for key, mm_tensor in mm_input_dict.items():
-                    multimodal_tensors.setdefault(key, []).append(mm_tensor)
-                    multimodal_num_items.setdefault(key, []).append(mm_tensor.size(0))
-        batch["multimodal_train_inputs"] = {
-            key: (
-                _concatenate_audio_tensors(tensors)
-                if key in _VARIABLE_LENGTH_AUDIO_INPUT_KEYS
-                else torch.cat(tensors, dim=0)
-            )
-            for key, tensors in multimodal_tensors.items()
-        }
+                    if key not in multimodal_data:
+                        multimodal_data[key] = mm_tensor
+                        multimodal_num_items[key] = [mm_tensor.size(0)]
+                    else:
+                        multimodal_data[key] = torch.cat([multimodal_data[key], mm_tensor], dim=0)
+                        multimodal_num_items[key].append(mm_tensor.size(0))
+        batch["multimodal_train_inputs"] = multimodal_data
         batch["multimodal_num_items"] = multimodal_num_items
 
     return batch
