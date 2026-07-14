@@ -21,34 +21,30 @@ from .parallel import get_parallel_state
 logger = logging.getLogger(__name__)
 
 
-_VARIABLE_LENGTH_AUDIO_INPUTS = {"input_features", "feature_attention_mask", "input_features_mask"}
+_VARIABLE_LENGTH_AUDIO_INPUT_KEYS = {"input_features", "feature_attention_mask", "input_features_mask"}
 
 
-def _concatenate_multimodal_tensors(key: str, tensors: list[torch.Tensor]) -> torch.Tensor:
-    """Concatenate media items, padding variable feature dimensions when needed.
-
-    Vision tensors are normally ragged only in dimension 0 and concatenate directly.
-    Audio feature tensors can also differ in time, so pad dimensions after the item
-    dimension to the largest shape in the micro-batch before concatenating.
-    """
-    if not tensors:
-        raise ValueError("Cannot concatenate an empty multimodal tensor list")
+def _concatenate_audio_tensors(tensors: list[torch.Tensor]) -> torch.Tensor:
+    """Concatenate audio items, padding the duration dimension so they can share a batch."""
     ndim = tensors[0].ndim
     if any(tensor.ndim != ndim for tensor in tensors):
-        raise ValueError("Multimodal tensors for one processor key must have the same rank")
-    if (
-        ndim <= 1
-        or all(tensor.shape[1:] == tensors[0].shape[1:] for tensor in tensors[1:])
-        or key not in _VARIABLE_LENGTH_AUDIO_INPUTS
-    ):
-        return torch.cat(tensors, dim=0)
+        raise ValueError("Audio tensors for one processor key must have the same rank")
 
-    target_shape = [max(tensor.shape[dim] for tensor in tensors) for dim in range(1, ndim)]
+    variable_dims = [
+        dim for dim in range(1, ndim) if any(tensor.shape[dim] != tensors[0].shape[dim] for tensor in tensors[1:])
+    ]
+    if not variable_dims:
+        return torch.cat(tensors, dim=0)
+    if len(variable_dims) != 1:
+        raise ValueError("Audio tensors may differ in only one non-item dimension")
+
+    variable_dim = variable_dims[0]
+    target_length = max(tensor.shape[variable_dim] for tensor in tensors)
     padded = []
     for tensor in tensors:
         padding = []
         for dim in range(ndim - 1, 0, -1):
-            padding.extend((0, target_shape[dim - 1] - tensor.shape[dim]))
+            padding.extend((0, target_length - tensor.shape[dim] if dim == variable_dim else 0))
         padded.append(F.pad(tensor, padding, value=0))
     return torch.cat(padded, dim=0)
 
@@ -337,7 +333,12 @@ def get_batch(
                     multimodal_tensors.setdefault(key, []).append(mm_tensor)
                     multimodal_num_items.setdefault(key, []).append(mm_tensor.size(0))
         batch["multimodal_train_inputs"] = {
-            key: _concatenate_multimodal_tensors(key, tensors) for key, tensors in multimodal_tensors.items()
+            key: (
+                _concatenate_audio_tensors(tensors)
+                if key in _VARIABLE_LENGTH_AUDIO_INPUT_KEYS
+                else torch.cat(tensors, dim=0)
+            )
+            for key, tensors in multimodal_tensors.items()
         }
         batch["multimodal_num_items"] = multimodal_num_items
 
