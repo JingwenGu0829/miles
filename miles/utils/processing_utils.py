@@ -163,74 +163,76 @@ def processor_supports_audio(processor) -> bool:
     return getattr(processor, "audio_token", None) is not None and hasattr(processor, "feature_extractor")
 
 
-def _unwrap_media_source(value):
-    if isinstance(value, dict):
-        if "url" in value:
-            return value["url"]
-        if "path" in value:
-            return value["path"]
-    return value
-
-
-def extract_multimodal_rollout_inputs(conversations) -> dict[str, list]:
-    """Extract original media sources from structured chat messages.
-
-    Local preprocessing turns videos into frame tensors and audio into waveforms. Those
-    values are useful to the training processor but cannot always be sent through the
-    SGLang HTTP API, so retain the original source alongside them.
-    """
+def _iter_content_items(conversations):
     if not isinstance(conversations, list) or not conversations:
-        return {}
+        return
     if isinstance(conversations[0], dict):
         conversations = [conversations]
 
-    result = {"images": [], "videos": [], "audio": []}
-    aliases = {
-        "image": ("images", ("image", "image_url")),
-        "image_url": ("images", ("image_url", "image")),
-        "video": ("videos", ("video", "video_url")),
-        "video_url": ("videos", ("video_url", "video")),
-        "audio": ("audio", ("audio", "audio_url")),
-        "audio_url": ("audio", ("audio_url", "audio")),
-        "input_audio": ("audio", ("input_audio", "audio")),
-    }
     for conversation in conversations:
         for message in conversation:
             content = message.get("content")
             if not isinstance(content, list):
                 continue
             for item in content:
-                if not isinstance(item, dict) or item.get("type") not in aliases:
-                    continue
-                output_key, source_keys = aliases[item["type"]]
-                source = next((item[key] for key in source_keys if key in item), None)
-                if source is not None:
-                    result[output_key].append(_unwrap_media_source(source))
-    return {key: values for key, values in result.items() if values}
+                if isinstance(item, dict):
+                    yield item
 
 
-def process_multimodal_info(prompt, processor, *, use_audio_in_video: bool = False):
-    """Build processor-ready and rollout-ready image/video/audio inputs."""
-    rollout_inputs = extract_multimodal_rollout_inputs(prompt)
+def _validate_multimodal_message_contract(conversations) -> None:
+    for item in _iter_content_items(conversations):
+        item_type = item.get("type")
+        if item_type in ("audio_url", "input_audio", "video_url"):
+            raise ValueError(f"Unsupported media type {item_type!r}; use 'audio' or 'video'")
+        if item_type == "audio" and "audio" not in item:
+            raise ValueError("Audio items must use {'type': 'audio', 'audio': ...}")
+        if item_type == "video":
+            unsupported_options = item.keys() - {"type", "video"}
+            if unsupported_options:
+                raise ValueError(
+                    f"Video rollout items do not yet support per-item options: {sorted(unsupported_options)}"
+                )
+
+
+def _extract_video_sources(conversations) -> list[str]:
+    sources = []
+    for item in _iter_content_items(conversations):
+        if item.get("type") == "video":
+            source = item.get("video")
+            if not isinstance(source, str):
+                raise TypeError("Video rollout input must be a path, URL, or data URI")
+            sources.append(source)
+    return sources
+
+
+def _build_multimodal_rollout_inputs(prompt) -> dict[str, list[str]]:
+    video_sources = _extract_video_sources(prompt)
+    return {"video_data": video_sources} if video_sources else {}
+
+
+def process_multimodal_info(prompt, processor):
+    """Build processor-ready media and its SGLang request payload."""
+    _validate_multimodal_message_contract(prompt)
     image_processor = getattr(processor, "image_processor", None)
     image_patch_size = getattr(image_processor, "patch_size", DEFAULT_PATCH_SIZE)
     if image_processor is not None and not hasattr(image_processor, "patch_size"):
         logger.info("Using default patch size: %s", DEFAULT_PATCH_SIZE)
 
-    if processor_supports_audio(processor):
+    has_audio = any(item.get("type") == "audio" for item in _iter_content_items(prompt))
+    if has_audio:
+        if not processor_supports_audio(processor):
+            raise ValueError("The configured processor does not accept audio inputs")
         from qwen_omni_utils import process_mm_info
 
         audios, images, videos, video_kwargs = process_mm_info(
             prompt,
-            use_audio_in_video=use_audio_in_video,
+            use_audio_in_video=False,
             return_video_kwargs=True,
             image_patch_size=image_patch_size,
         )
         multimodal_inputs = {"audio": audios, "images": images, "videos": videos}
         if videos is not None:
             multimodal_inputs.update(video_kwargs)
-        if use_audio_in_video:
-            multimodal_inputs["use_audio_in_video"] = True
     else:
         # TODO: temporary solution, will write model-independent media loaders later.
         from qwen_vl_utils import process_vision_info as qwen_process_vision_info
@@ -239,6 +241,7 @@ def process_multimodal_info(prompt, processor, *, use_audio_in_video: bool = Fal
         multimodal_inputs = {"images": images, "videos": videos}
 
     multimodal_inputs = {key: value for key, value in multimodal_inputs.items() if value is not None}
+    rollout_inputs = _build_multimodal_rollout_inputs(prompt)
     return multimodal_inputs, rollout_inputs
 
 

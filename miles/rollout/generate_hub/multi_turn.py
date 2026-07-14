@@ -60,7 +60,9 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
             break
 
         if args.generate_multi_samples:
+            multimodal_train_inputs = sample.multimodal_train_inputs
             sample = deepcopy(input.sample)
+            sample.multimodal_train_inputs = multimodal_train_inputs
 
         output = await post(url, payload)
         await update_sample_from_response(args, sample, payload=payload, output=output, update_loss_mask=True)

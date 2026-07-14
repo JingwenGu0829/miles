@@ -17,9 +17,8 @@ class Sample:
     tokens: list[int] = field(default_factory=list)
     # Processor-ready media (for example PIL images, sampled video frames, or audio waveforms).
     multimodal_inputs: dict[str, Any] = None
-    # Original media sources used to construct the rollout-engine request. Keeping these
-    # separate matters for video: processor-ready frame tensors are not JSON serializable.
-    multimodal_rollout_inputs: dict[str, Any] = None
+    # Original video sources; processed video tensors cannot be sent over HTTP.
+    multimodal_rollout_inputs: dict[str, list[str]] | None = None
     multimodal_train_inputs: dict[str, Any] = None  # processed multimodal data, e.g. pixel_values, etc.
     # response
     response: str = ""

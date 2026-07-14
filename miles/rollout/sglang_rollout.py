@@ -23,11 +23,7 @@ from miles.utils.eval_config import EvalDatasetConfig
 from miles.utils.http_utils import get, post
 from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.utils.misc import SingletonMeta, load_function
-from miles.utils.processing_utils import (
-    get_prompt_ids_and_multimodal_train_inputs,
-    load_processor,
-    load_tokenizer,
-)
+from miles.utils.processing_utils import get_prompt_ids_and_multimodal_train_inputs, load_processor, load_tokenizer
 from miles.utils.types import Sample
 
 from .generate_utils.generate_endpoint_utils import get_indexer_topk_from_response
