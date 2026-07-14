@@ -15,7 +15,11 @@ class Sample:
     # prompt
     prompt: str | list[dict[str, str]] = ""
     tokens: list[int] = field(default_factory=list)
-    multimodal_inputs: dict[str, Any] = None  # raw multimodal data, e.g. images, videos, etc.
+    # Processor-ready media (for example PIL images, sampled video frames, or audio waveforms).
+    multimodal_inputs: dict[str, Any] = None
+    # Original media sources used to construct the rollout-engine request. Keeping these
+    # separate matters for video: processor-ready frame tensors are not JSON serializable.
+    multimodal_rollout_inputs: dict[str, Any] = None
     multimodal_train_inputs: dict[str, Any] = None  # processed multimodal data, e.g. pixel_values, etc.
     # response
     response: str = ""
@@ -217,7 +221,7 @@ class Sample:
         """Reset generated outputs so the original prompt can be re-sampled.
 
         Keeps identity / prompt fields (group_index, index, prompt, label,
-        multimodal_inputs, metadata, generate_function_path, session_id) and
+        multimodal_inputs, multimodal_rollout_inputs, metadata, generate_function_path, session_id) and
         restores everything else to dataclass defaults.
         """
         self.tokens = []

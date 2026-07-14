@@ -6,8 +6,9 @@ from typing import Any
 
 from miles.utils.http_utils import post
 from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
-from miles.utils.processing_utils import encode_image_for_rollout_engine
 from miles.utils.types import Sample
+
+from .multimodal import build_rollout_engine_multimodal_payload, has_multimodal_inputs
 
 
 def _build_prefill_scoring_payload(
@@ -40,9 +41,7 @@ def _build_prefill_scoring_payload(
     if is_lora_enabled(args):
         payload["lora_path"] = LORA_ADAPTER_NAME
 
-    if sample.multimodal_inputs and sample.multimodal_inputs.get("images"):
-        image_data = sample.multimodal_inputs["images"]
-        payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
+    payload.update(build_rollout_engine_multimodal_payload(sample.multimodal_inputs, sample.multimodal_rollout_inputs))
 
     return payload
 
@@ -50,7 +49,9 @@ def _build_prefill_scoring_payload(
 def _can_batch_prefill_score(args: Any, samples: list[Sample]) -> bool:
     if getattr(args, "sglang_router_policy", None) == "consistent_hashing":
         return False
-    return not any(sample.multimodal_inputs and sample.multimodal_inputs.get("images") for sample in samples)
+    return not any(
+        has_multimodal_inputs(sample.multimodal_inputs, sample.multimodal_rollout_inputs) for sample in samples
+    )
 
 
 def _build_batch_prefill_scoring_payload(

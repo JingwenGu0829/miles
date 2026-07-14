@@ -9,8 +9,10 @@ import numpy as np
 import pybase64
 
 from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
-from miles.utils.processing_utils import encode_image_for_rollout_engine
+from miles.utils.processing_utils import get_prompt_ids_and_multimodal_train_inputs
 from miles.utils.types import Sample
+
+from .multimodal import build_rollout_engine_multimodal_payload
 
 
 # Make this an isolated function because users may want to compute their own
@@ -18,14 +20,9 @@ def compute_prompt_ids_from_sample(state, sample, tools=None):
     prompt = sample.prompt
 
     if state.processor and sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()):
-        processor_output = state.processor(text=prompt, **sample.multimodal_inputs)
-        prompt_ids = processor_output["input_ids"][0]
-
-        # TODO shall we move it to other places? then can make this function immutable
-        sample.multimodal_train_inputs = {
-            k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask"]
-        } or None
-
+        prompt_ids, sample.multimodal_train_inputs = get_prompt_ids_and_multimodal_train_inputs(
+            state.processor, prompt, sample.multimodal_inputs
+        )
         return prompt_ids
     else:
         if not isinstance(prompt, str):
@@ -41,6 +38,7 @@ def compute_request_payload(
     input_ids: list[int],
     sampling_params: dict,
     multimodal_inputs: dict | None = None,
+    multimodal_rollout_inputs: dict | None = None,
 ) -> tuple[dict[str, Any] | None, Sample.Status | None]:
     sampling_params = deepcopy(sampling_params)
     max_new_tokens = sampling_params.pop("max_new_tokens", args.rollout_max_response_len)
@@ -58,8 +56,7 @@ def compute_request_payload(
     }
     if is_lora_enabled(args):
         payload["lora_path"] = LORA_ADAPTER_NAME
-    if image_data := (multimodal_inputs or {}).get("images"):
-        payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
+    payload.update(build_rollout_engine_multimodal_payload(multimodal_inputs, multimodal_rollout_inputs))
 
     return payload, None
 

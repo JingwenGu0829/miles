@@ -16,6 +16,7 @@ pylatexenc
 pytest-asyncio
 pyyaml
 qwen_vl_utils # for VLM
+qwen-omni-utils # for audio/image/video input processing
 ray[default]
 ring_flash_attn; platform_system == "Linux"
 sglang-router>=0.2.3
