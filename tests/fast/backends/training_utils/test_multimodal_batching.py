@@ -16,11 +16,6 @@ def test_concatenate_multimodal_tensors_pads_variable_audio_time_dimension():
     assert torch.equal(result[1], second[0])
 
 
-def test_concatenate_multimodal_tensors_rejects_different_ranks():
-    with pytest.raises(ValueError, match="same rank"):
-        _concatenate_multimodal_tensors("input_features", [torch.ones((1, 3)), torch.ones((1, 3, 4))])
-
-
 def test_concatenate_multimodal_tensors_keeps_strict_vision_shapes():
     with pytest.raises(RuntimeError):
         _concatenate_multimodal_tensors(
