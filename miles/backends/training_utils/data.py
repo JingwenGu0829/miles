@@ -26,12 +26,10 @@ _VARIABLE_LENGTH_AUDIO_INPUT_KEYS = {"input_features", "feature_attention_mask",
 
 def _concatenate_audio_tensors(tensors: list[torch.Tensor]) -> torch.Tensor:
     """Concatenate audio items, padding the duration dimension so they can share a batch."""
-    ndim = tensors[0].ndim
-    if any(tensor.ndim != ndim for tensor in tensors):
-        raise ValueError("Audio tensors for one processor key must have the same rank")
-
     variable_dims = [
-        dim for dim in range(1, ndim) if any(tensor.shape[dim] != tensors[0].shape[dim] for tensor in tensors[1:])
+        dim
+        for dim in range(1, tensors[0].ndim)
+        if any(tensor.shape[dim] != tensors[0].shape[dim] for tensor in tensors[1:])
     ]
     if not variable_dims:
         return torch.cat(tensors, dim=0)
@@ -43,7 +41,7 @@ def _concatenate_audio_tensors(tensors: list[torch.Tensor]) -> torch.Tensor:
     padded = []
     for tensor in tensors:
         padding = []
-        for dim in range(ndim - 1, 0, -1):
+        for dim in range(tensor.ndim - 1, 0, -1):
             padding.extend((0, target_length - tensor.shape[dim] if dim == variable_dim else 0))
         padded.append(F.pad(tensor, padding, value=0))
     return torch.cat(padded, dim=0)
