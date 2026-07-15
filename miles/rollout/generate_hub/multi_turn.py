@@ -53,7 +53,7 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
             sample.tokens,
             input.sampling_params,
             multimodal_inputs=sample.multimodal_inputs,
-            multimodal_rollout_inputs=sample.multimodal_rollout_inputs,
+            rollout_media_sources=sample.rollout_media_sources,
             rollout_input_ids=rollout_input_ids,
         )
         if payload is None:

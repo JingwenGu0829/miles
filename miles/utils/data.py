@@ -214,15 +214,15 @@ class Dataset:
                 output_prompt = prompt
 
             if processor:
-                from miles.utils.processing_utils import process_multimodal_info
+                from miles.utils.processing_utils import process_vision_info_with_sources
 
                 assert isinstance(
                     prompt, list
                 ), f"prompt must be a list when processor is not None, got {type(prompt)} instead"
-                multimodal_inputs, multimodal_rollout_inputs = process_multimodal_info(prompt, processor)
+                multimodal_inputs, rollout_media_sources = process_vision_info_with_sources(prompt, processor)
             else:
                 multimodal_inputs = None
-                multimodal_rollout_inputs = None
+                rollout_media_sources = None
 
             origin_samples.append(
                 Sample(
@@ -230,7 +230,7 @@ class Dataset:
                     label=data[label_key] if label_key is not None else None,
                     metadata=metadata,
                     multimodal_inputs=multimodal_inputs,
-                    multimodal_rollout_inputs=multimodal_rollout_inputs,
+                    rollout_media_sources=rollout_media_sources,
                 )
             )
 

@@ -1,9 +1,18 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy
 import torch
+
+
+class RolloutMediaSources(TypedDict, total=False):
+    """Raw media that the rollout engine resolves and preprocesses.
+
+    Sources are forwarded unchanged; local paths must be visible to engine nodes.
+    """
+
+    videos: list[str]
 
 
 @dataclass
@@ -18,8 +27,9 @@ class Sample:
     tokens: list[int] = field(default_factory=list)
     # Processor-ready media (for example PIL images or sampled video frames).
     multimodal_inputs: dict[str, Any] = None
-    # JSON-safe media sources that the rollout engine must process itself.
-    multimodal_rollout_inputs: dict[str, list[str]] | None = None
+    # Raw, JSON-safe media sources that the rollout engine must process itself.
+    # Keys are modality names (currently "videos"; "audios" can be added later).
+    rollout_media_sources: RolloutMediaSources | None = None
     # Tokenizer-only prompt IDs used when the rollout engine expands raw media.
     rollout_prompt_ids: list[int] | None = None
     multimodal_train_inputs: dict[str, Any] = None  # processed multimodal data, e.g. pixel_values, etc.
@@ -223,7 +233,7 @@ class Sample:
         """Reset generated outputs so the original prompt can be re-sampled.
 
         Keeps identity / prompt fields (group_index, index, prompt, label,
-        multimodal_inputs, multimodal_rollout_inputs, metadata,
+        multimodal_inputs, rollout_media_sources, metadata,
         generate_function_path, session_id) and restores everything else to
         dataclass defaults.
         """

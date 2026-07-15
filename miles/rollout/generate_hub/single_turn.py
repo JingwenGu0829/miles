@@ -41,7 +41,7 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
         rollout_input_ids=rollout_input_ids,
         sampling_params=sampling_params,
         multimodal_inputs=sample.multimodal_inputs,
-        multimodal_rollout_inputs=sample.multimodal_rollout_inputs,
+        rollout_media_sources=sample.rollout_media_sources,
     )
     if payload is None:
         sample.status = halt_status

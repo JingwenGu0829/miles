@@ -10,15 +10,19 @@ import pybase64
 
 from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.utils.processing_utils import call_processor
-from miles.utils.types import Sample
+from miles.utils.types import RolloutMediaSources, Sample
 
 from .multimodal import build_rollout_engine_multimodal_payload, build_rollout_input_ids
 
 
-def _tokenize_prompt(tokenizer, prompt, tools=None) -> list[int]:
+def _render_prompt(tokenizer, prompt, tools=None) -> str:
     if not isinstance(prompt, str):
         prompt = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True, tools=tools)
-    return tokenizer.encode(prompt, add_special_tokens=False)
+    return prompt
+
+
+def _tokenize_prompt(tokenizer, prompt, tools=None) -> list[int]:
+    return tokenizer.encode(_render_prompt(tokenizer, prompt, tools=tools), add_special_tokens=False)
 
 
 # Make this an isolated function because users may want to compute their own
@@ -26,7 +30,12 @@ def compute_prompt_ids_from_sample(state, sample, tools=None):
     prompt = sample.prompt
 
     if state.processor and sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()):
-        processor_output = call_processor(state.processor, prompt, sample.multimodal_inputs)
+        # The local processor and rollout engine must see the exact same rendered
+        # prompt when the rollout engine owns raw-media expansion.
+        rollout_prompt = _render_prompt(state.tokenizer, prompt, tools=tools) if sample.rollout_media_sources else None
+        processor_output = call_processor(
+            state.processor, rollout_prompt if rollout_prompt is not None else prompt, sample.multimodal_inputs
+        )
         prompt_ids = processor_output["input_ids"][0]
         prompt_ids = prompt_ids.tolist() if hasattr(prompt_ids, "tolist") else list(prompt_ids)
         prompt_ids = [int(token_id) for token_id in prompt_ids]
@@ -39,7 +48,7 @@ def compute_prompt_ids_from_sample(state, sample, tools=None):
         # Raw media is expanded by the rollout engine. Keep these tokenizer-only
         # IDs separate from Miles' processor-expanded training IDs.
         sample.rollout_prompt_ids = (
-            _tokenize_prompt(state.tokenizer, prompt, tools=tools) if sample.multimodal_rollout_inputs else None
+            state.tokenizer.encode(rollout_prompt, add_special_tokens=False) if rollout_prompt is not None else None
         )
         return prompt_ids
 
@@ -52,7 +61,7 @@ def compute_request_payload(
     input_ids: list[int],
     sampling_params: dict,
     multimodal_inputs: dict | None = None,
-    multimodal_rollout_inputs: dict[str, list[str]] | None = None,
+    rollout_media_sources: RolloutMediaSources | None = None,
     rollout_input_ids: list[int] | None = None,
 ) -> tuple[dict[str, Any] | None, Sample.Status | None]:
     sampling_params = deepcopy(sampling_params)
@@ -71,7 +80,7 @@ def compute_request_payload(
     }
     if is_lora_enabled(args):
         payload["lora_path"] = LORA_ADAPTER_NAME
-    payload.update(build_rollout_engine_multimodal_payload(multimodal_inputs, multimodal_rollout_inputs))
+    payload.update(build_rollout_engine_multimodal_payload(multimodal_inputs, rollout_media_sources))
 
     return payload, None
 
@@ -90,6 +99,8 @@ async def update_sample_from_response(
 ):
     # Initialize sample.tokens for the first turn
     if (len(sample.response) == 0) and not sample.tokens:
+        if sample.rollout_prompt_ids is not None:
+            raise ValueError("Canonical processor-expanded prompt tokens must be initialized before video rollout")
         sample.tokens = payload["input_ids"]
 
     if x := output["meta_info"].get("output_token_logprobs"):

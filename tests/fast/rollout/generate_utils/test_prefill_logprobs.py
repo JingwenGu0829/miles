@@ -175,7 +175,7 @@ def test_video_prefill_uses_rollout_prompt_ids_and_canonical_logprob_offset():
         response_length=2,
         status=Sample.Status.COMPLETED,
         multimodal_inputs={"videos": [object()]},
-        multimodal_rollout_inputs={"video_data": ["video.mp4"]},
+        rollout_media_sources={"videos": ["video.mp4"]},
         rollout_prompt_ids=[1, 2],
     )
     args = SimpleNamespace(sglang_enable_lora=False, sglang_router_policy="round_robin")

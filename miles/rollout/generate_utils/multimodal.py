@@ -1,26 +1,29 @@
 from typing import Any
 
 from miles.utils.processing_utils import encode_image_for_rollout_engine
+from miles.utils.types import RolloutMediaSources
 
 
 def build_rollout_engine_multimodal_payload(
     multimodal_inputs: dict[str, Any] | None,
-    multimodal_rollout_inputs: dict[str, list[str]] | None,
+    rollout_media_sources: RolloutMediaSources | None,
 ) -> dict[str, list[str]]:
     """Build the JSON-safe multimodal portion of a rollout request."""
     multimodal_inputs = multimodal_inputs or {}
-    multimodal_rollout_inputs = multimodal_rollout_inputs or {}
+    rollout_media_sources = rollout_media_sources or {}
 
-    unsupported_fields = set(multimodal_rollout_inputs) - {"video_data"}
-    if unsupported_fields:
-        raise ValueError(f"Unsupported multimodal rollout fields: {sorted(unsupported_fields)}")
+    unsupported_modalities = set(rollout_media_sources) - {"videos"}
+    if unsupported_modalities:
+        raise ValueError(f"Unsupported rollout media modalities: {sorted(unsupported_modalities)}")
 
     payload = {}
     if image_data := multimodal_inputs.get("images"):
         payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
 
     processed_videos = multimodal_inputs.get("videos")
-    video_data = multimodal_rollout_inputs.get("video_data")
+    video_data = rollout_media_sources.get("videos")
+    if video_data is not None and any(not isinstance(source, str) for source in video_data):
+        raise TypeError("Rollout video sources must be paths, URLs, or data URIs")
     processed_video_count = len(processed_videos) if processed_videos is not None else 0
     rollout_video_count = len(video_data) if video_data is not None else 0
     if processed_video_count != rollout_video_count:
@@ -36,11 +39,10 @@ def build_rollout_engine_multimodal_payload(
 
 def has_multimodal_inputs(
     multimodal_inputs: dict[str, Any] | None,
-    multimodal_rollout_inputs: dict[str, list[str]] | None,
+    rollout_media_sources: RolloutMediaSources | None,
 ) -> bool:
-    return any(value is not None and len(value) > 0 for value in (multimodal_inputs or {}).values()) or any(
-        value is not None and len(value) > 0 for value in (multimodal_rollout_inputs or {}).values()
-    )
+    processor_media = ((multimodal_inputs or {}).get(key) for key in ("images", "videos", "audio", "audios"))
+    return any(value is not None and len(value) > 0 for value in processor_media) or bool(rollout_media_sources)
 
 
 def build_rollout_input_ids(
