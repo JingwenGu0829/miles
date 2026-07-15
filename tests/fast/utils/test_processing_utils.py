@@ -3,10 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.utils.processing_utils import process_vision_info_with_video_sources
+from miles.utils.processing_utils import extract_rollout_video_sources, process_vision_info
 
 
-def test_process_vision_info_retains_video_sources_in_prompt_order(monkeypatch):
+def test_vision_inputs_and_rollout_sources_follow_prompt_order(monkeypatch):
     calls = {}
 
     def fake_process_vision_info(prompt, image_patch_size):
@@ -31,7 +31,8 @@ def test_process_vision_info_retains_video_sources_in_prompt_order(monkeypatch):
     ]
     processor = SimpleNamespace(image_processor=SimpleNamespace(patch_size=16))
 
-    processor_inputs, rollout_video_sources = process_vision_info_with_video_sources(prompt, processor)
+    rollout_video_sources = extract_rollout_video_sources(prompt)
+    processor_inputs = process_vision_info(prompt, processor)
 
     assert processor_inputs == {
         "images": ["resolved-image"],
@@ -41,11 +42,11 @@ def test_process_vision_info_retains_video_sources_in_prompt_order(monkeypatch):
     assert calls == {"prompt": prompt, "image_patch_size": 16}
 
 
-def test_process_vision_info_rejects_video_sources_the_engine_cannot_replay():
+def test_extract_rollout_video_sources_rejects_inputs_the_engine_cannot_replay():
     invalid_items = [
         ({"type": "video", "video": ["frame-1.png"]}, TypeError),
         ({"type": "video", "video": "video.mp4", "fps": 4}, ValueError),
     ]
     for item, error_type in invalid_items:
         with pytest.raises(error_type):
-            process_vision_info_with_video_sources([{"role": "user", "content": [item]}], object())
+            extract_rollout_video_sources([{"role": "user", "content": [item]}])

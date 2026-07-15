@@ -214,12 +214,13 @@ class Dataset:
                 output_prompt = prompt
 
             if processor:
-                from miles.utils.processing_utils import process_vision_info_with_video_sources
+                from miles.utils.processing_utils import extract_rollout_video_sources, process_vision_info
 
                 assert isinstance(
                     prompt, list
                 ), f"prompt must be a list when processor is not None, got {type(prompt)} instead"
-                multimodal_inputs, rollout_video_sources = process_vision_info_with_video_sources(prompt, processor)
+                rollout_video_sources = extract_rollout_video_sources(prompt)
+                multimodal_inputs = process_vision_info(prompt, processor)
             else:
                 multimodal_inputs = None
                 rollout_video_sources = None

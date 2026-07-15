@@ -167,7 +167,7 @@ def _iter_multimodal_content(prompt):
                     yield item
 
 
-def _extract_rollout_video_sources(prompt) -> list[str] | None:
+def extract_rollout_video_sources(prompt) -> list[str] | None:
     video_sources = []
     for item in _iter_multimodal_content(prompt):
         if item.get("type") != "video":
@@ -188,9 +188,7 @@ def _extract_rollout_video_sources(prompt) -> list[str] | None:
     return video_sources or None
 
 
-def process_vision_info_with_video_sources(prompt, processor) -> tuple[dict, list[str] | None]:
-    rollout_video_sources = _extract_rollout_video_sources(prompt)
-
+def process_vision_info(prompt, processor):
     # TODO: temporary solution, will write model-independent media utils later
     from qwen_vl_utils import process_vision_info as qwen_process_vision_info
 
@@ -201,13 +199,7 @@ def process_vision_info_with_video_sources(prompt, processor) -> tuple[dict, lis
         logger.info(f"Using default patch size: {DEFAULT_PATCH_SIZE}")
         image_patch_size = DEFAULT_PATCH_SIZE
     images, videos = qwen_process_vision_info(prompt, image_patch_size=image_patch_size)
-    multimodal_inputs = {"images": images, "videos": videos}
-    return multimodal_inputs, rollout_video_sources
-
-
-def process_vision_info(prompt, processor):
-    multimodal_inputs, _ = process_vision_info_with_video_sources(prompt, processor)
-    return multimodal_inputs
+    return {"images": images, "videos": videos}
 
 
 def encode_image_for_rollout_engine(image) -> str:

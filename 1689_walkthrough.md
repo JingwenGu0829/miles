@@ -62,7 +62,7 @@ Dataset receives a structured conversation
     |      -> multimodal_inputs["images"]
     |      -> multimodal_inputs["videos"]
     |
-    `-- _extract_rollout_video_sources(...)
+    `-- extract_rollout_video_sources(...)
            -> rollout_video_sources: list[str] | None
 
 Generation renders the initial prompt once for video samples
@@ -146,9 +146,8 @@ A local path must be visible from the SGLang worker. URLs and data URIs do not h
 ### `miles/utils/processing_utils.py`
 
 - `_iter_multimodal_content` traverses one structured conversation or a batch.
-- `_extract_rollout_video_sources` extracts video strings in prompt occurrence order.
-- `process_vision_info_with_video_sources` returns both locally resolved media and raw video sources.
-- `process_vision_info` remains the compatibility wrapper for callers that only need local processor inputs.
+- `extract_rollout_video_sources` extracts video strings in prompt occurrence order.
+- `process_vision_info` returns locally resolved image and video inputs.
 
 Source order must match the order used by `qwen_vl_utils`; the later count check detects missing or duplicated sources.
 
