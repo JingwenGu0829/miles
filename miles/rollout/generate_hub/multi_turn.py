@@ -46,7 +46,13 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
     for _turn in range(args.generate_max_turns):
         # ----------------------- Call inference endpoint -------------------------
 
-        payload, halt_status = compute_request_payload(args, sample.tokens, input.sampling_params)
+        payload, halt_status = compute_request_payload(
+            args,
+            sample.tokens,
+            input.sampling_params,
+            multimodal_inputs=sample.multimodal_inputs,
+            multimodal_rollout_inputs=sample.multimodal_rollout_inputs,
+        )
         if payload is None:
             sample.status = halt_status
             if args.generate_multi_samples and multi_samples:
@@ -54,7 +60,9 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
             break
 
         if args.generate_multi_samples:
+            multimodal_train_inputs = sample.multimodal_train_inputs
             sample = deepcopy(input.sample)
+            sample.multimodal_train_inputs = multimodal_train_inputs
 
         output = await post(url, payload)
         await update_sample_from_response(args, sample, payload=payload, output=output, update_loss_mask=True)

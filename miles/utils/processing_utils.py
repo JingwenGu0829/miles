@@ -131,6 +131,8 @@ def call_processor(processor, text, multimodal_inputs: dict | None = None):
             medias.extend({"type": "image", "image": image} for image in images)
         if videos := multimodal_inputs.get("videos"):
             medias.extend({"type": "video", "video": video} for video in videos)
+        if audios := multimodal_inputs.get("audio"):
+            medias.extend({"type": "audio", "audio": audio} for audio in audios)
         return processor(text=text, medias=medias)
 
     kwargs = build_processor_kwargs(multimodal_inputs)
@@ -151,17 +153,101 @@ def load_processor(name_or_path: str, **kwargs):
     return proc
 
 
-def process_vision_info(prompt, processor):
-    # TODO: temporary solution, will write image utils for miles later
-    from qwen_vl_utils import process_vision_info as qwen_process_vision_info
+def processor_supports_audio(processor) -> bool:
+    """Whether a Transformers-style processor exposes an audio input."""
+    try:
+        if "audio" in inspect.signature(processor.__call__).parameters:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return getattr(processor, "audio_token", None) is not None and hasattr(processor, "feature_extractor")
 
-    if hasattr(processor.image_processor, "patch_size"):
-        image_patch_size = processor.image_processor.patch_size
+
+def _iter_content_items(conversations):
+    if not isinstance(conversations, list) or not conversations:
+        return
+    if isinstance(conversations[0], dict):
+        conversations = [conversations]
+
+    for conversation in conversations:
+        for message in conversation:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for item in content:
+                if isinstance(item, dict):
+                    yield item
+
+
+def _validate_multimodal_message_contract(conversations) -> None:
+    for item in _iter_content_items(conversations):
+        item_type = item.get("type")
+        if item_type in ("audio_url", "input_audio", "video_url"):
+            raise ValueError(f"Unsupported media type {item_type!r}; use 'audio' or 'video'")
+        if item_type == "audio" and "audio" not in item:
+            raise ValueError("Audio items must use {'type': 'audio', 'audio': ...}")
+        if item_type == "video":
+            unsupported_options = item.keys() - {"type", "video"}
+            if unsupported_options:
+                raise ValueError(
+                    f"Video rollout items do not yet support per-item options: {sorted(unsupported_options)}"
+                )
+
+
+def _extract_video_sources(conversations) -> list[str]:
+    sources = []
+    for item in _iter_content_items(conversations):
+        if item.get("type") == "video":
+            source = item.get("video")
+            if not isinstance(source, str):
+                raise TypeError("Video rollout input must be a path, URL, or data URI")
+            sources.append(source)
+    return sources
+
+
+def _build_multimodal_rollout_inputs(prompt) -> dict[str, list[str]]:
+    video_sources = _extract_video_sources(prompt)
+    return {"video_data": video_sources} if video_sources else {}
+
+
+def process_multimodal_info(prompt, processor):
+    """Build processor-ready media and its SGLang request payload."""
+    _validate_multimodal_message_contract(prompt)
+    image_processor = getattr(processor, "image_processor", None)
+    image_patch_size = getattr(image_processor, "patch_size", DEFAULT_PATCH_SIZE)
+    if image_processor is not None and not hasattr(image_processor, "patch_size"):
+        logger.info("Using default patch size: %s", DEFAULT_PATCH_SIZE)
+
+    has_audio = any(item.get("type") == "audio" for item in _iter_content_items(prompt))
+    if has_audio:
+        if not processor_supports_audio(processor):
+            raise ValueError("The configured processor does not accept audio inputs")
+        from qwen_omni_utils import process_mm_info
+
+        audios, images, videos, video_kwargs = process_mm_info(
+            prompt,
+            use_audio_in_video=False,
+            return_video_kwargs=True,
+            image_patch_size=image_patch_size,
+        )
+        multimodal_inputs = {"audio": audios, "images": images, "videos": videos}
+        if videos is not None:
+            multimodal_inputs.update(video_kwargs)
     else:
-        logger.info(f"Using default patch size: {DEFAULT_PATCH_SIZE}")
-        image_patch_size = DEFAULT_PATCH_SIZE
-    images, videos = qwen_process_vision_info(prompt, image_patch_size=image_patch_size)
-    multimodal_inputs = {"images": images, "videos": videos}
+        # TODO: temporary solution, will write model-independent media loaders later.
+        from qwen_vl_utils import process_vision_info as qwen_process_vision_info
+
+        images, videos = qwen_process_vision_info(prompt, image_patch_size=image_patch_size)
+        multimodal_inputs = {"images": images, "videos": videos}
+
+    multimodal_inputs = {key: value for key, value in multimodal_inputs.items() if value is not None}
+    rollout_inputs = _build_multimodal_rollout_inputs(prompt)
+    return multimodal_inputs, rollout_inputs
+
+
+def process_vision_info(prompt, processor):
+    """Backward-compatible wrapper returning only processor-ready media."""
+    multimodal_inputs, _ = process_multimodal_info(prompt, processor)
     return multimodal_inputs
 
 
@@ -173,3 +259,30 @@ def encode_image_for_rollout_engine(image) -> str:
     image.save(buffer, format="PNG")
     image_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{image_base64}"
+
+
+def get_prompt_ids_and_multimodal_train_inputs(processor, text, multimodal_inputs):
+    """Run a processor and separate prompt IDs from tensor-like model inputs."""
+    import numpy as np
+    import torch
+
+    processor_output = call_processor(processor, text, multimodal_inputs)
+    prompt_ids = processor_output["input_ids"][0]
+    if hasattr(prompt_ids, "tolist"):
+        prompt_ids = prompt_ids.tolist()
+    prompt_ids = [int(token_id) for token_id in prompt_ids]
+
+    train_inputs = {}
+    for key, value in processor_output.items():
+        if key in ("input_ids", "attention_mask"):
+            continue
+        if isinstance(value, torch.Tensor):
+            train_inputs[key] = value
+        elif isinstance(value, np.ndarray):
+            train_inputs[key] = torch.from_numpy(value)
+        elif isinstance(value, (list, tuple)):
+            try:
+                train_inputs[key] = torch.as_tensor(value)
+            except (TypeError, ValueError, RuntimeError):
+                logger.debug("Dropping non-tensor processor output %s (%s)", key, type(value).__name__)
+    return prompt_ids, train_inputs or None
