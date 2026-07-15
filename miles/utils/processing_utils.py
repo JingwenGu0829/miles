@@ -151,17 +151,69 @@ def load_processor(name_or_path: str, **kwargs):
     return proc
 
 
-def process_vision_info(prompt, processor):
-    # TODO: temporary solution, will write image utils for miles later
+def _iter_multimodal_content(prompt):
+    """Yield structured content items from one conversation or a batch."""
+    if not isinstance(prompt, list) or not prompt:
+        return
+
+    conversations = [prompt] if isinstance(prompt[0], dict) else prompt
+    for conversation in conversations:
+        for message in conversation:
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for item in content:
+                if isinstance(item, dict):
+                    yield item
+
+
+def _extract_video_rollout_inputs(prompt) -> dict[str, list[str]] | None:
+    """Extract raw video sources in the same order as the local media loader."""
+    video_sources = []
+    for item in _iter_multimodal_content(prompt):
+        if item.get("type") != "video":
+            continue
+
+        unsupported_options = set(item) - {"type", "video"}
+        if unsupported_options:
+            raise ValueError(
+                f"Video rollout does not yet support per-item processing options: {sorted(unsupported_options)}"
+            )
+
+        source = item.get("video")
+        if not isinstance(source, str):
+            raise TypeError("Video rollout input must be a path, URL, or data URI")
+        video_sources.append(source)
+
+    return {"video_data": video_sources} if video_sources else None
+
+
+def process_multimodal_info(prompt, processor):
+    """Build local processor inputs and raw media inputs for rollout.
+
+    Images keep the existing Miles contract: the locally resolved PIL images are
+    later encoded for the rollout request. Videos retain their original source
+    because sampled frame tensors are not an HTTP transport format.
+    """
+    multimodal_rollout_inputs = _extract_video_rollout_inputs(prompt)
+
+    # TODO: temporary solution, will write model-independent media utils later
     from qwen_vl_utils import process_vision_info as qwen_process_vision_info
 
-    if hasattr(processor.image_processor, "patch_size"):
-        image_patch_size = processor.image_processor.patch_size
+    image_processor = getattr(processor, "image_processor", None)
+    if image_processor is not None and hasattr(image_processor, "patch_size"):
+        image_patch_size = image_processor.patch_size
     else:
         logger.info(f"Using default patch size: {DEFAULT_PATCH_SIZE}")
         image_patch_size = DEFAULT_PATCH_SIZE
     images, videos = qwen_process_vision_info(prompt, image_patch_size=image_patch_size)
     multimodal_inputs = {"images": images, "videos": videos}
+    return multimodal_inputs, multimodal_rollout_inputs
+
+
+def process_vision_info(prompt, processor):
+    """Backward-compatible wrapper returning only local processor inputs."""
+    multimodal_inputs, _ = process_multimodal_info(prompt, processor)
     return multimodal_inputs
 
 

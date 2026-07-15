@@ -14,8 +14,14 @@ class Sample:
     index: int | None = None
     # prompt
     prompt: str | list[dict[str, str]] = ""
+    # Canonical training sequence; multimodal prompt tokens are processor-expanded.
     tokens: list[int] = field(default_factory=list)
-    multimodal_inputs: dict[str, Any] = None  # raw multimodal data, e.g. images, videos, etc.
+    # Processor-ready media (for example PIL images or sampled video frames).
+    multimodal_inputs: dict[str, Any] = None
+    # JSON-safe media sources that the rollout engine must process itself.
+    multimodal_rollout_inputs: dict[str, list[str]] | None = None
+    # Tokenizer-only prompt IDs used when the rollout engine expands raw media.
+    rollout_prompt_ids: list[int] | None = None
     multimodal_train_inputs: dict[str, Any] = None  # processed multimodal data, e.g. pixel_values, etc.
     # response
     response: str = ""
@@ -217,10 +223,12 @@ class Sample:
         """Reset generated outputs so the original prompt can be re-sampled.
 
         Keeps identity / prompt fields (group_index, index, prompt, label,
-        multimodal_inputs, metadata, generate_function_path, session_id) and
-        restores everything else to dataclass defaults.
+        multimodal_inputs, multimodal_rollout_inputs, metadata,
+        generate_function_path, session_id) and restores everything else to
+        dataclass defaults.
         """
         self.tokens = []
+        self.rollout_prompt_ids = None
         self.multimodal_train_inputs = None
         self.response = ""
         self.response_length = 0

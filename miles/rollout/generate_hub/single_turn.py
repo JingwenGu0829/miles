@@ -6,6 +6,7 @@ from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
 from miles.rollout.generate_utils.generate_endpoint_utils import (
     compute_prompt_ids_from_sample,
     compute_request_payload,
+    compute_rollout_input_ids,
     update_sample_from_response,
 )
 from miles.utils.http_utils import post
@@ -33,12 +34,21 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
     else:
         input_ids = prompt_ids
 
+    rollout_input_ids = compute_rollout_input_ids(sample, input_ids, prompt_ids)
     payload, halt_status = compute_request_payload(
-        args, input_ids=input_ids, sampling_params=sampling_params, multimodal_inputs=sample.multimodal_inputs
+        args,
+        input_ids=input_ids,
+        rollout_input_ids=rollout_input_ids,
+        sampling_params=sampling_params,
+        multimodal_inputs=sample.multimodal_inputs,
+        multimodal_rollout_inputs=sample.multimodal_rollout_inputs,
     )
     if payload is None:
         sample.status = halt_status
         return GenerateFnOutput(samples=sample)
+
+    if not sample.tokens:
+        sample.tokens = list(prompt_ids)
 
     output = await post(url, payload)
     await update_sample_from_response(args, sample, payload=payload, output=output)

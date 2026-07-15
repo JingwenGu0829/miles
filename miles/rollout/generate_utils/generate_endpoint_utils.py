@@ -9,8 +9,16 @@ import numpy as np
 import pybase64
 
 from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
-from miles.utils.processing_utils import encode_image_for_rollout_engine
+from miles.utils.processing_utils import call_processor
 from miles.utils.types import Sample
+
+from .multimodal import build_rollout_engine_multimodal_payload, build_rollout_input_ids
+
+
+def _tokenize_prompt(tokenizer, prompt, tools=None) -> list[int]:
+    if not isinstance(prompt, str):
+        prompt = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True, tools=tools)
+    return tokenizer.encode(prompt, add_special_tokens=False)
 
 
 # Make this an isolated function because users may want to compute their own
@@ -18,22 +26,25 @@ def compute_prompt_ids_from_sample(state, sample, tools=None):
     prompt = sample.prompt
 
     if state.processor and sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()):
-        processor_output = state.processor(text=prompt, **sample.multimodal_inputs)
+        processor_output = call_processor(state.processor, prompt, sample.multimodal_inputs)
         prompt_ids = processor_output["input_ids"][0]
+        prompt_ids = prompt_ids.tolist() if hasattr(prompt_ids, "tolist") else list(prompt_ids)
+        prompt_ids = [int(token_id) for token_id in prompt_ids]
 
         # TODO shall we move it to other places? then can make this function immutable
         sample.multimodal_train_inputs = {
             k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask"]
         } or None
 
+        # Raw media is expanded by the rollout engine. Keep these tokenizer-only
+        # IDs separate from Miles' processor-expanded training IDs.
+        sample.rollout_prompt_ids = (
+            _tokenize_prompt(state.tokenizer, prompt, tools=tools) if sample.multimodal_rollout_inputs else None
+        )
         return prompt_ids
-    else:
-        if not isinstance(prompt, str):
-            prompt = state.tokenizer.apply_chat_template(
-                prompt, tokenize=False, add_generation_prompt=True, tools=tools
-            )
 
-        return state.tokenizer.encode(prompt, add_special_tokens=False)
+    sample.rollout_prompt_ids = None
+    return _tokenize_prompt(state.tokenizer, prompt, tools=tools)
 
 
 def compute_request_payload(
@@ -41,6 +52,8 @@ def compute_request_payload(
     input_ids: list[int],
     sampling_params: dict,
     multimodal_inputs: dict | None = None,
+    multimodal_rollout_inputs: dict[str, list[str]] | None = None,
+    rollout_input_ids: list[int] | None = None,
 ) -> tuple[dict[str, Any] | None, Sample.Status | None]:
     sampling_params = deepcopy(sampling_params)
     max_new_tokens = sampling_params.pop("max_new_tokens", args.rollout_max_response_len)
@@ -50,7 +63,7 @@ def compute_request_payload(
         return None, Sample.Status.TRUNCATED
 
     payload = {
-        "input_ids": input_ids,
+        "input_ids": rollout_input_ids if rollout_input_ids is not None else input_ids,
         "sampling_params": {**sampling_params, "max_new_tokens": max_new_tokens},
         "return_logprob": True,
         "return_routed_experts": args.use_rollout_routing_replay,
@@ -58,10 +71,18 @@ def compute_request_payload(
     }
     if is_lora_enabled(args):
         payload["lora_path"] = LORA_ADAPTER_NAME
-    if image_data := (multimodal_inputs or {}).get("images"):
-        payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
+    payload.update(build_rollout_engine_multimodal_payload(multimodal_inputs, multimodal_rollout_inputs))
 
     return payload, None
+
+
+def compute_rollout_input_ids(sample: Sample, input_ids: list[int], processor_prompt_ids: list[int]) -> list[int]:
+    """Build request IDs while leaving the canonical Sample tokens untouched."""
+    return build_rollout_input_ids(
+        input_ids,
+        processor_prompt_ids=processor_prompt_ids,
+        rollout_prompt_ids=sample.rollout_prompt_ids,
+    )
 
 
 async def update_sample_from_response(
