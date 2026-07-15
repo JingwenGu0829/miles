@@ -10,7 +10,7 @@ import pybase64
 
 from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.utils.processing_utils import call_processor
-from miles.utils.types import RolloutMediaSources, Sample
+from miles.utils.types import Sample
 
 from .multimodal import build_rollout_engine_multimodal_payload, build_rollout_input_ids
 
@@ -30,9 +30,7 @@ def compute_prompt_ids_from_sample(state, sample, tools=None):
     prompt = sample.prompt
 
     if state.processor and sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()):
-        # The local processor and rollout engine must see the exact same rendered
-        # prompt when the rollout engine owns raw-media expansion.
-        rollout_prompt = _render_prompt(state.tokenizer, prompt, tools=tools) if sample.rollout_media_sources else None
+        rollout_prompt = _render_prompt(state.tokenizer, prompt, tools=tools) if sample.rollout_video_sources else None
         processor_output = call_processor(
             state.processor, rollout_prompt if rollout_prompt is not None else prompt, sample.multimodal_inputs
         )
@@ -45,8 +43,6 @@ def compute_prompt_ids_from_sample(state, sample, tools=None):
             k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask"]
         } or None
 
-        # Raw media is expanded by the rollout engine. Keep these tokenizer-only
-        # IDs separate from Miles' processor-expanded training IDs.
         sample.rollout_prompt_ids = (
             state.tokenizer.encode(rollout_prompt, add_special_tokens=False) if rollout_prompt is not None else None
         )
@@ -61,7 +57,7 @@ def compute_request_payload(
     input_ids: list[int],
     sampling_params: dict,
     multimodal_inputs: dict | None = None,
-    rollout_media_sources: RolloutMediaSources | None = None,
+    rollout_video_sources: list[str] | None = None,
     rollout_input_ids: list[int] | None = None,
 ) -> tuple[dict[str, Any] | None, Sample.Status | None]:
     sampling_params = deepcopy(sampling_params)
@@ -80,13 +76,12 @@ def compute_request_payload(
     }
     if is_lora_enabled(args):
         payload["lora_path"] = LORA_ADAPTER_NAME
-    payload.update(build_rollout_engine_multimodal_payload(multimodal_inputs, rollout_media_sources))
+    payload.update(build_rollout_engine_multimodal_payload(multimodal_inputs, rollout_video_sources))
 
     return payload, None
 
 
 def compute_rollout_input_ids(sample: Sample, input_ids: list[int], processor_prompt_ids: list[int]) -> list[int]:
-    """Build request IDs while leaving the canonical Sample tokens untouched."""
     return build_rollout_input_ids(
         input_ids,
         processor_prompt_ids=processor_prompt_ids,

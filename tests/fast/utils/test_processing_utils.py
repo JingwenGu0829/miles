@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.utils.processing_utils import process_vision_info_with_sources
+from miles.utils.processing_utils import process_vision_info_with_video_sources
 
 
 def test_process_vision_info_retains_video_sources_in_prompt_order(monkeypatch):
@@ -31,13 +31,13 @@ def test_process_vision_info_retains_video_sources_in_prompt_order(monkeypatch):
     ]
     processor = SimpleNamespace(image_processor=SimpleNamespace(patch_size=16))
 
-    processor_inputs, rollout_media_sources = process_vision_info_with_sources(prompt, processor)
+    processor_inputs, rollout_video_sources = process_vision_info_with_video_sources(prompt, processor)
 
     assert processor_inputs == {
         "images": ["resolved-image"],
         "videos": ["processed-video-1", "processed-video-2"],
     }
-    assert rollout_media_sources == {"videos": ["first.mp4", "https://example.test/second.mp4"]}
+    assert rollout_video_sources == ["first.mp4", "https://example.test/second.mp4"]
     assert calls == {"prompt": prompt, "image_patch_size": 16}
 
 
@@ -48,4 +48,4 @@ def test_process_vision_info_rejects_video_sources_the_engine_cannot_replay():
     ]
     for item, error_type in invalid_items:
         with pytest.raises(error_type):
-            process_vision_info_with_sources([{"role": "user", "content": [item]}], object())
+            process_vision_info_with_video_sources([{"role": "user", "content": [item]}], object())

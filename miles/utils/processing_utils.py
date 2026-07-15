@@ -10,7 +10,6 @@ from tokenizers import Tokenizer as RawTokenizer
 from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizerBase, ProcessorMixin
 
 from miles.utils.hf_config import register_hf_config_aliases
-from miles.utils.types import RolloutMediaSources
 
 logger = logging.getLogger(__name__)
 
@@ -168,8 +167,7 @@ def _iter_multimodal_content(prompt):
                     yield item
 
 
-def _extract_rollout_media_sources(prompt) -> RolloutMediaSources | None:
-    """Extract raw video sources in the same order as the local media loader."""
+def _extract_rollout_video_sources(prompt) -> list[str] | None:
     video_sources = []
     for item in _iter_multimodal_content(prompt):
         if item.get("type") != "video":
@@ -187,17 +185,11 @@ def _extract_rollout_media_sources(prompt) -> RolloutMediaSources | None:
             raise TypeError("Video rollout input must be a path, URL, or data URI")
         video_sources.append(source)
 
-    return {"videos": video_sources} if video_sources else None
+    return video_sources or None
 
 
-def process_vision_info_with_sources(prompt, processor) -> tuple[dict, RolloutMediaSources | None]:
-    """Build local processor inputs and raw media inputs for rollout.
-
-    Images keep the existing Miles contract: the locally resolved PIL images are
-    later encoded for the rollout request. Videos retain their original source
-    because sampled frame tensors are not an HTTP transport format.
-    """
-    rollout_media_sources = _extract_rollout_media_sources(prompt)
+def process_vision_info_with_video_sources(prompt, processor) -> tuple[dict, list[str] | None]:
+    rollout_video_sources = _extract_rollout_video_sources(prompt)
 
     # TODO: temporary solution, will write model-independent media utils later
     from qwen_vl_utils import process_vision_info as qwen_process_vision_info
@@ -210,12 +202,11 @@ def process_vision_info_with_sources(prompt, processor) -> tuple[dict, RolloutMe
         image_patch_size = DEFAULT_PATCH_SIZE
     images, videos = qwen_process_vision_info(prompt, image_patch_size=image_patch_size)
     multimodal_inputs = {"images": images, "videos": videos}
-    return multimodal_inputs, rollout_media_sources
+    return multimodal_inputs, rollout_video_sources
 
 
 def process_vision_info(prompt, processor):
-    """Backward-compatible wrapper returning only local processor inputs."""
-    multimodal_inputs, _ = process_vision_info_with_sources(prompt, processor)
+    multimodal_inputs, _ = process_vision_info_with_video_sources(prompt, processor)
     return multimodal_inputs
 
 

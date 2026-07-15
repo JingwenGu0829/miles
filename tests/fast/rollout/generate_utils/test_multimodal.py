@@ -56,7 +56,7 @@ def _video_sample():
     return Sample(
         prompt="<video>describe it",
         multimodal_inputs={"videos": [object()]},
-        rollout_media_sources={"videos": ["video.mp4"]},
+        rollout_video_sources=["video.mp4"],
     )
 
 
@@ -64,7 +64,7 @@ def test_multimodal_request_contract():
     image = Image.new("RGB", (2, 2), color="red")
     media_payload = build_rollout_engine_multimodal_payload(
         {"images": [image], "videos": [object()]},
-        {"videos": ["https://example.test/video.mp4"]},
+        ["https://example.test/video.mp4"],
     )
     rollout_ids = build_rollout_input_ids(
         PROCESSOR_PROMPT_IDS + [20],
