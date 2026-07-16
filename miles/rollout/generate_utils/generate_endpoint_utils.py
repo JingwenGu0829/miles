@@ -15,41 +15,54 @@ from miles.utils.types import Sample
 from .multimodal import build_rollout_engine_multimodal_payload, build_rollout_input_ids
 
 
-def _render_prompt(tokenizer, prompt, tools=None) -> str:
-    if not isinstance(prompt, str):
-        prompt = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True, tools=tools)
-    return prompt
-
-
-def _tokenize_prompt(tokenizer, prompt, tools=None) -> list[int]:
-    return tokenizer.encode(_render_prompt(tokenizer, prompt, tools=tools), add_special_tokens=False)
-
-
 # Make this an isolated function because users may want to compute their own
 def compute_prompt_ids_from_sample(state, sample, tools=None):
     prompt = sample.prompt
+    has_processor_inputs = bool(
+        state.processor
+        and sample.multimodal_inputs
+        and any(value is not None for value in sample.multimodal_inputs.values())
+    )
 
-    if state.processor and sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()):
-        rollout_prompt = _render_prompt(state.tokenizer, prompt, tools=tools) if sample.rollout_video_inputs else None
-        processor_output = call_processor(
-            state.processor, rollout_prompt if rollout_prompt is not None else prompt, sample.multimodal_inputs
+    if not has_processor_inputs:
+        if not isinstance(prompt, str):
+            prompt = state.tokenizer.apply_chat_template(
+                prompt,
+                tokenize=False,
+                add_generation_prompt=True,
+                tools=tools,
+            )
+
+        sample.rollout_prompt_ids = None
+        return state.tokenizer.encode(prompt, add_special_tokens=False)
+
+    if sample.rollout_video_inputs:
+        if not isinstance(prompt, str):
+            prompt = state.tokenizer.apply_chat_template(
+                prompt,
+                tokenize=False,
+                add_generation_prompt=True,
+                tools=tools,
+            )
+
+        sample.rollout_prompt_ids = state.tokenizer.encode(
+            prompt,
+            add_special_tokens=False,
         )
-        prompt_ids = processor_output["input_ids"][0]
-        prompt_ids = prompt_ids.tolist() if hasattr(prompt_ids, "tolist") else list(prompt_ids)
-        prompt_ids = [int(token_id) for token_id in prompt_ids]
+    else:
+        sample.rollout_prompt_ids = None
 
-        # TODO shall we move it to other places? then can make this function immutable
-        sample.multimodal_train_inputs = {
-            k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask"]
-        } or None
+    processor_output = call_processor(state.processor, prompt, sample.multimodal_inputs)
+    prompt_ids = processor_output["input_ids"][0]
+    if hasattr(prompt_ids, "tolist"):
+        prompt_ids = prompt_ids.tolist()
 
-        sample.rollout_prompt_ids = (
-            state.tokenizer.encode(rollout_prompt, add_special_tokens=False) if rollout_prompt is not None else None
-        )
-        return prompt_ids
+    # TODO shall we move it to other places? then can make this function immutable
+    sample.multimodal_train_inputs = {
+        k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask"]
+    } or None
 
-    sample.rollout_prompt_ids = None
-    return _tokenize_prompt(state.tokenizer, prompt, tools=tools)
+    return prompt_ids
 
 
 def compute_request_payload(
