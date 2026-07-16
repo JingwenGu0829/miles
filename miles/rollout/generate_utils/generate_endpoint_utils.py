@@ -116,8 +116,6 @@ async def update_sample_from_response(
 ):
     # Initialize sample.tokens for the first turn
     if (len(sample.response) == 0) and not sample.tokens:
-        if sample.rollout_prompt_ids is not None:
-            raise ValueError("Canonical processor-expanded prompt tokens must be initialized before video rollout")
         sample.tokens = payload["input_ids"]
 
     if x := output["meta_info"].get("output_token_logprobs"):

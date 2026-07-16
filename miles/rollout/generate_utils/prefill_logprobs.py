@@ -24,8 +24,10 @@ def _build_prefill_scoring_payload(
         )
 
     rollout_input_ids = sample.tokens
+    rollout_prompt_len = prompt_len
     if sample.rollout_prompt_ids is not None:
         rollout_input_ids = sample.rollout_prompt_ids + sample.tokens[prompt_len:]
+        rollout_prompt_len = len(sample.rollout_prompt_ids)
     payload = {
         "input_ids": rollout_input_ids,
         "sampling_params": {
@@ -38,7 +40,7 @@ def _build_prefill_scoring_payload(
         # SGLang returns input_token_logprobs aligned to tokens from logprob_start_len,
         # with the first value None. Start one token before the response so the
         # returned tail contains every response-token logprob.
-        "logprob_start_len": prompt_len - 1,
+        "logprob_start_len": rollout_prompt_len - 1,
     }
 
     if is_lora_enabled(args):

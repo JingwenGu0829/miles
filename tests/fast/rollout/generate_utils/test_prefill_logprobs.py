@@ -184,5 +184,5 @@ def test_video_prefill_uses_rollout_prompt_ids_and_canonical_logprob_offset():
 
     assert payload["input_ids"] == [1, 2, 20, 21]
     assert payload["video_data"] == ["video.mp4"]
-    assert payload["logprob_start_len"] == 2
+    assert payload["logprob_start_len"] == 1
     assert prefill_logprobs._can_batch_prefill_score(args, [sample]) is False
