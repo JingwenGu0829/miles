@@ -151,39 +151,27 @@ def load_processor(name_or_path: str, **kwargs):
     return proc
 
 
-def _iter_multimodal_content(prompt):
-    """Yield structured content items from one conversation or a batch."""
-    if not isinstance(prompt, list) or not prompt:
-        return
-
-    conversations = [prompt] if isinstance(prompt[0], dict) else prompt
-    for conversation in conversations:
-        for message in conversation:
-            content = message.get("content")
-            if not isinstance(content, list):
-                continue
-            for item in content:
-                if isinstance(item, dict):
-                    yield item
-
-
-def extract_rollout_video_sources(prompt) -> list[str] | None:
+def extract_rollout_video_sources(prompt: list[dict]) -> list[str] | None:
     video_sources = []
-    for item in _iter_multimodal_content(prompt):
-        if item.get("type") != "video":
+    for message in prompt:
+        content = message["content"]
+        if not isinstance(content, list):
             continue
 
-        unsupported_options = set(item) - {"type", "video"}
-        if unsupported_options:
-            raise ValueError(
-                "Video rollout cannot replay per-item processing options; configure matching local and rollout "
-                f"processor defaults instead: {sorted(unsupported_options)}"
-            )
+        for item in content:
+            if item.get("type") != "video":
+                continue
 
-        source = item.get("video")
-        if not isinstance(source, str):
-            raise TypeError("Video rollout input must be a path, URL, or data URI")
-        video_sources.append(source)
+            unsupported_options = set(item) - {"type", "video"}
+            if unsupported_options:
+                raise ValueError(
+                    f"Video rollout supports source-only items; unsupported fields: {sorted(unsupported_options)}"
+                )
+
+            source = item["video"]
+            if not isinstance(source, str):
+                raise TypeError("Video rollout input must be a path, URL, or data URI")
+            video_sources.append(source)
 
     return video_sources or None
 
