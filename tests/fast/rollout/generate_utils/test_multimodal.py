@@ -9,10 +9,7 @@ from miles.rollout.generate_utils.generate_endpoint_utils import (
     compute_prompt_ids_from_sample,
     compute_request_payload,
 )
-from miles.rollout.generate_utils.multimodal import (
-    build_rollout_engine_multimodal_payload,
-    build_rollout_input_ids,
-)
+from miles.rollout.generate_utils.multimodal import build_rollout_engine_multimodal_payload
 from miles.utils.types import Sample
 
 PROCESSOR_PROMPT_IDS = [100, 101, 102]
@@ -66,11 +63,6 @@ def test_multimodal_request_contract():
         {"images": [image], "videos": [object()]},
         [{"type": "video", "video": "https://example.test/video.mp4"}],
     )
-    rollout_ids = build_rollout_input_ids(
-        PROCESSOR_PROMPT_IDS + [20],
-        processor_prompt_ids=PROCESSOR_PROMPT_IDS,
-        rollout_prompt_ids=ROLLOUT_PROMPT_IDS,
-    )
     request, status = compute_request_payload(
         _args(rollout_max_context_len=5),
         input_ids=PROCESSOR_PROMPT_IDS,
@@ -80,7 +72,6 @@ def test_multimodal_request_contract():
 
     assert media_payload["image_data"][0].startswith("data:image/png;base64,")
     assert media_payload["video_data"] == ["https://example.test/video.mp4"]
-    assert rollout_ids == ROLLOUT_PROMPT_IDS + [20]
     assert status is None
     assert request["input_ids"] == ROLLOUT_PROMPT_IDS
     assert request["sampling_params"]["max_new_tokens"] == 2

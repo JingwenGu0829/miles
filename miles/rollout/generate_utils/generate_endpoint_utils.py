@@ -12,7 +12,7 @@ from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.utils.processing_utils import call_processor
 from miles.utils.types import Sample
 
-from .multimodal import build_rollout_engine_multimodal_payload, build_rollout_input_ids
+from .multimodal import build_rollout_engine_multimodal_payload
 
 
 # Make this an isolated function because users may want to compute their own
@@ -95,11 +95,10 @@ def compute_request_payload(
 
 
 def compute_rollout_input_ids(sample: Sample, input_ids: list[int], processor_prompt_ids: list[int]) -> list[int]:
-    return build_rollout_input_ids(
-        input_ids,
-        processor_prompt_ids=processor_prompt_ids,
-        rollout_prompt_ids=sample.rollout_prompt_ids,
-    )
+    if sample.rollout_prompt_ids is None:
+        return input_ids
+
+    return sample.rollout_prompt_ids + input_ids[len(processor_prompt_ids) :]
 
 
 async def update_sample_from_response(

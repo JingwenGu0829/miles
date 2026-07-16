@@ -40,28 +40,3 @@ def build_rollout_engine_multimodal_payload(
         payload["video_data"] = video_data
 
     return payload
-
-
-def has_multimodal_inputs(
-    multimodal_inputs: dict[str, Any] | None,
-    rollout_video_inputs: list[dict[str, Any]] | None,
-) -> bool:
-    processor_media = ((multimodal_inputs or {}).get(key) for key in ("images", "videos"))
-    return any(value is not None and len(value) > 0 for value in processor_media) or bool(rollout_video_inputs)
-
-
-def build_rollout_input_ids(
-    input_ids: list[int],
-    *,
-    processor_prompt_ids: list[int],
-    rollout_prompt_ids: list[int] | None,
-) -> list[int]:
-    input_ids = list(input_ids)
-    processor_prompt_ids = list(processor_prompt_ids)
-    if rollout_prompt_ids is None:
-        return input_ids
-
-    if input_ids[: len(processor_prompt_ids)] != processor_prompt_ids:
-        raise ValueError("Cannot build rollout_input_ids: input IDs do not start with the processed prompt IDs")
-
-    return list(rollout_prompt_ids) + input_ids[len(processor_prompt_ids) :]

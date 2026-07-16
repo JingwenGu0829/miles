@@ -8,11 +8,7 @@ from miles.utils.http_utils import post
 from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.utils.types import Sample
 
-from .multimodal import (
-    build_rollout_engine_multimodal_payload,
-    build_rollout_input_ids,
-    has_multimodal_inputs,
-)
+from .multimodal import build_rollout_engine_multimodal_payload
 
 
 def _build_prefill_scoring_payload(
@@ -27,12 +23,9 @@ def _build_prefill_scoring_payload(
             f"tokens={len(sample.tokens)}, response_length={sample.response_length}"
         )
 
-    processor_prompt_ids = sample.tokens[:prompt_len]
-    rollout_input_ids = build_rollout_input_ids(
-        sample.tokens,
-        processor_prompt_ids=processor_prompt_ids,
-        rollout_prompt_ids=sample.rollout_prompt_ids,
-    )
+    rollout_input_ids = sample.tokens
+    if sample.rollout_prompt_ids is not None:
+        rollout_input_ids = sample.rollout_prompt_ids + sample.tokens[prompt_len:]
     payload = {
         "input_ids": rollout_input_ids,
         "sampling_params": {
@@ -59,7 +52,13 @@ def _build_prefill_scoring_payload(
 def _can_batch_prefill_score(args: Any, samples: list[Sample]) -> bool:
     if getattr(args, "sglang_router_policy", None) == "consistent_hashing":
         return False
-    return not any(has_multimodal_inputs(sample.multimodal_inputs, sample.rollout_video_inputs) for sample in samples)
+
+    for sample in samples:
+        multimodal_inputs = sample.multimodal_inputs or {}
+        if multimodal_inputs.get("images") or multimodal_inputs.get("videos") or sample.rollout_video_inputs:
+            return False
+
+    return True
 
 
 def _build_batch_prefill_scoring_payload(
