@@ -169,7 +169,7 @@ async def test_recompute_samples_batches_by_logprob_start_len(monkeypatch):
     assert calls[3][1]["input_ids"] == [[10, 11, 12, 21]]
 
 
-def test_video_prefill_uses_rollout_prompt_ids_and_canonical_logprob_offset():
+def test_video_prefill_uses_rollout_prompt_ids_and_rollout_logprob_offset():
     sample = Sample(
         tokens=[100, 101, 102, 20, 21],
         response_length=2,
